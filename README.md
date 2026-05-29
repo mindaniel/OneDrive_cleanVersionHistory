@@ -1,6 +1,6 @@
 # OneDrive_cleanVersionHistory
-Clean your full Onedrive
-How your friend can find their OneDrive ID
+Clean your full Onedrive because of Version History
+How to find OneDrive ID
 Method 1: The Address Bar (Easiest)
 
 Tell them to log into onedrive.live.com.
