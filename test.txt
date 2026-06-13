@@ -1,0 +1,129 @@
+// ==============================================================================
+// BULLETPROOF ONEDRIVE CLEANER (SMART SKIP + CONCURRENT BATCHING)
+// ==============================================================================
+
+const SITE_URL = "https://universityofstandrews907-my.sharepoint.com/personal/qmn1_st-andrews_ac_uk";
+
+// Set to your target folder
+const STARTING_FOLDER = "/personal/qmn1_st-andrews_ac_uk/Documents/Data/mutual funds-main"; 
+
+const VERSIONS_TO_KEEP = 2;
+const EXTENSIONS_TO_SKIP = ['.pdf', '.jpg', '.png', '.mp4', '.zip', '.exe'];
+const CONCURRENT_REQUESTS = 5; // Processes 5 files at exactly the same time
+
+let requestDigest = "";
+let tokenFetchTime = 0;
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function getValidHeaders() {
+    if (Date.now() - tokenFetchTime > 20 * 60 * 1000) {
+        const digestResponse = await fetch(`${SITE_URL}/_api/contextinfo`, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json;odata=nometadata' }
+        });
+        const digestData = await digestResponse.json();
+        requestDigest = digestData.FormDigestValue;
+        tokenFetchTime = Date.now();
+    }
+    return {
+        "Accept": "application/json;odata=verbose",
+        "Content-Type": "application/json;odata=verbose",
+        "X-RequestDigest": requestDigest
+    };
+}
+
+async function processInBatches(items, batchSize, processFn) {
+    for (let i = 0; i < items.length; i += batchSize) {
+        const batch = items.slice(i, i + batchSize);
+        // Process the batch concurrently
+        await Promise.all(batch.map(item => processFn(item)));
+        await sleep(150); // Tiny pause between batches to prevent 500/429 errors
+    }
+}
+
+async function processFolder(folderPath) {
+    console.log(`\n📂 Scanning: ${folderPath}`);
+    const encodedFolder = encodeURIComponent(folderPath).replace(/'/g, "%27");
+    const headers = await getValidHeaders();
+
+    await sleep(200); 
+
+    // 1. Fetch Files & Apply Smart Skip
+    const getFilesUrl = `${SITE_URL}/_api/web/GetFolderByServerRelativeUrl('${encodedFolder}')/Files?$select=ServerRelativeUrl,Name,UIVersionLabel`;
+    const filesResponse = await fetch(getFilesUrl, { headers });
+    
+    if (filesResponse.ok) {
+        const data = await filesResponse.json();
+        const files = data.d ? data.d.results : [];
+        const filesToScan = [];
+
+        for (const file of files) {
+            const fileName = file.Name.toLowerCase();
+            
+            // Skip untouched or ignored files instantly
+            if (EXTENSIONS_TO_SKIP.some(ext => fileName.endsWith(ext))) continue;
+            const versionNum = parseFloat(file.UIVersionLabel);
+            if (versionNum <= VERSIONS_TO_KEEP) continue;
+
+            filesToScan.push(file);
+        }
+        
+        if (filesToScan.length > 0) {
+            console.log(`   🔥 Found ${filesToScan.length} files requiring history cleanup...`);
+            
+            // Execute safe concurrent batching on the bloated files
+            await processInBatches(filesToScan, CONCURRENT_REQUESTS, async (file) => {
+                await cleanFileVersions(file.ServerRelativeUrl, file.Name);
+            });
+        }
+    } else {
+        console.error(`⚠️ Server rejected file list for: ${folderPath}`);
+    }
+
+    // 2. Dive into Subfolders
+    const getFoldersUrl = `${SITE_URL}/_api/web/GetFolderByServerRelativeUrl('${encodedFolder}')/Folders?$select=ServerRelativeUrl,Name`;
+    await sleep(200); 
+    const foldersResponse = await fetch(getFoldersUrl, { headers: await getValidHeaders() });
+    
+    if (foldersResponse.ok) {
+        const foldersData = await foldersResponse.json();
+        const subfolders = foldersData.d ? foldersData.d.results : [];
+        for (const subfolder of subfolders) {
+            if (subfolder.Name === "Forms" || subfolder.Name === "Attachments" || subfolder.Name.startsWith("_")) continue;
+            await processFolder(subfolder.ServerRelativeUrl);
+        }
+    }
+}
+
+async function cleanFileVersions(filePath, fileName) {
+    const encodedPath = encodeURIComponent(filePath).replace(/'/g, "%27");
+    const headers = await getValidHeaders();
+
+    const getVersionsUrl = `${SITE_URL}/_api/web/GetListItemUsingPath(decodedUrl='${encodedPath}')/versions?$select=VersionId,VersionLabel,IsCurrentVersion&$top=5000`;
+    const versionsResponse = await fetch(getVersionsUrl, { headers });
+    
+    if (!versionsResponse.ok) return;
+
+    const versionsData = await versionsResponse.json();
+    const versions = versionsData.d ? versionsData.d.results : [];
+
+    if (versions.length <= VERSIONS_TO_KEEP) return; 
+
+    console.log(`  📄 ${fileName}: Trimming ${versions.length - VERSIONS_TO_KEEP} old versions...`);
+    const versionsToDelete = versions.slice(VERSIONS_TO_KEEP);
+
+    for (const v of versionsToDelete) {
+        const recycleUrl = `${SITE_URL}/_api/web/GetFileByServerRelativePath(decodedUrl='${encodedPath}')/versions/RecycleByLabel(versionLabel='${v.VersionLabel}')`;
+        const delResponse = await fetch(recycleUrl, { method: 'POST', headers: await getValidHeaders() });
+        
+        if (!delResponse.ok) {
+            console.error(`    ❌ Failed to recycle version ${v.VersionLabel} of ${fileName}`);
+        }
+    }
+}
+
+console.log("🚀 Initializing BULLETPROOF OneDrive cleanup...");
+processFolder(STARTING_FOLDER).then(() => {
+    console.log("\n🎉 Cleanup complete! Check your Recycle Bin to verify, then empty it manually to reclaim your storage.");
+});
