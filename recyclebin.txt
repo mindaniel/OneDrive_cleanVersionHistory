@@ -1,0 +1,23 @@
+(async function nukeRecycleBin() {
+    console.log("🗑️ Commencing full Two-Stage Recycle Bin purge...");
+    const SITE_URL = "https://universityofstandrews907-my.sharepoint.com/personal/qmn1_st-andrews_ac_uk";
+
+    // 1. Get a fresh security token
+    const tokenRes = await fetch(`${SITE_URL}/_api/contextinfo`, { method: 'POST', headers: { 'Accept': 'application/json;odata=nometadata' }});
+    const tokenData = await tokenRes.json();
+    const headers = {
+        "Accept": "application/json;odata=verbose",
+        "Content-Type": "application/json;odata=verbose",
+        "X-RequestDigest": tokenData.FormDigestValue
+    };
+
+    // 2. Move Stage 1 to Stage 2
+    console.log("   📦 Moving all items to Second-Stage...");
+    const stage1 = await fetch(`${SITE_URL}/_api/site/getrecyclebinitems(rowLimit='5000',isAscending='false',itemState=1,orderBy=3)/MoveAllToSecondStage`, { method: 'POST', headers });
+    if (stage1.ok) console.log("   ✅ First-stage cleared.");
+
+    // 3. Obliterate Stage 2
+    console.log("   🔥 Permanently deleting items from Second-Stage...");
+    const stage2 = await fetch(`${SITE_URL}/_api/site/getrecyclebinitems(rowLimit='5000',isAscending='false',itemState=2,orderBy=3)/DeleteAllSecondStageItems`, { method: 'POST', headers });
+    if (stage2.ok) console.log("   ✅ Second-stage cleared. Storage space successfully reclaimed!");
+})();
