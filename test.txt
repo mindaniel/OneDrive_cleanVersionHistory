@@ -8,7 +8,7 @@ const SITE_URL = "https://universityofstandrews907-my.sharepoint.com/personal/qm
 const STARTING_FOLDER = "/personal/qmn1_st-andrews_ac_uk/Documents/Data/mutual funds-main"; 
 
 const VERSIONS_TO_KEEP = 2;
-const EXTENSIONS_TO_SKIP = ['.pdf', '.jpg', '.png', '.mp4', '.zip', '.exe'];
+const EXTENSIONS_TO_SKIP = [];
 const CONCURRENT_REQUESTS = 5; // Processes 5 files at exactly the same time
 
 let requestDigest = "";
